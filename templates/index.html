@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Index page</title>
+</head>
+<body>
+    <div>
+        <h3>Фильтрация</h3>
+        <form id="filtering">
+            <label>Колонка:
+                <select id="filter_column">
+                    {% for column in filtered_columns %}
+                    <option value="{{ column.name }}">{{ column.info.verbose_name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Условие:
+                <select id="filter_condition">
+                    <option value="equals">равно</option>
+                    <option value="include">содержит</option>
+                    <option value="greater">больше</option>
+                    <option value="less">меньше</option>
+                </select>
+            </label>
+            <label>Значение:
+                <input id="filter_value">
+            </label>
+            <input type="submit" value="Фильтровать">
+        </form>
+        <p>Дату требуется вводить в формате "ДД.ММ.ГГГГ".</p>
+    </div><hr>
+    <div>
+        <h3>Сортировка</h3>
+        <form id="sorting">
+            <label>Колонка:
+                <select id="sort_column">
+                    {% for column in sorted_columns %}
+                    <option value="{{ column.name }}">{{ column.info.verbose_name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <input type="submit" value="Сортировать">
+        </form>
+    </div><hr>
+    <div>
+        <h3>Таблица</h3>
+        <table border="1" id="data_table">
+            <thead>
+                <tr>
+                    {% for column in columns %}
+                    <td id="{{ column.name }}_column">{{ column.info.verbose_name }}</td>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <p>
+            <button id="to_begin"><<</button>
+            <button id="to_previous"><</button>
+            <label>Страница <input id="page_number" value="1"></label>
+            <button id="to_next">></button>
+            <button id="to_end">>></button>
+        </p>
+        <p><label>Количество строк в таблице: <input id="row_count" value="20"></label></p>
+    </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.24.0/axios.min.js"></script>
+<script>
+    let table = document.getElementById('data_table');
+    let filteringForm = document.getElementById('filtering');
+    let sortingForm = document.getElementById('sorting')
+    let rowCountInput = document.getElementById('row_count');
+    let pageNumberInput = document.getElementById('page_number');
+    let currentPageNumber = pageNumberInput.value;
+    let columns = {{ columns_name|tojson|safe }};
+    let is_filtered = false;
+    let filter_column, filter_condition, filter_value;
+
+    function getCurrentRowCount() {
+        return rowCountInput.value;
+    }
+
+    function getCurrentPageNumber() {
+        return pageNumberInput.value;
+    }
+
+    function getAllRowCount() {
+        return table.tBodies[0].rows.length;
+    }
+
+    function getMaxPagesCount() {
+        return Math.ceil(getAllRowCount() / getCurrentRowCount());
+    }
+
+    function changePageNumberInputValue(value) {
+        pageNumberInput.value = parseInt(value);
+        currentPageNumber = parseInt(value);
+    }
+
+    function makeTable() {
+        let rows = table.tBodies[0].rows;
+        startRow = (getCurrentPageNumber() - 1) * getCurrentRowCount() + 1;
+        endRow = getCurrentPageNumber() * getCurrentRowCount();
+        for (let i = 0; i < rows.length; i++) {
+            rows[i].style.display = 'none';
+            if ((i + 1) >= startRow && (i + 1) <= endRow) rows[i].style.display = 'table-row';
+        }
+    }
+
+    function buildTable(data) {
+        let newBody = document.createElement('tbody');
+        let oldBody = table.tBodies[0];
+        oldBody.parentNode.replaceChild(newBody, oldBody);
+        for (let i = 0; i < data.length; i++) {
+            let row = newBody.insertRow();
+            for (let j = 0; j < columns.length; j++) {
+                let cell = row.insertCell();
+                let text = data[i][columns[j]];
+                if (columns[j] === "date") text = (new Date(text)).toLocaleString('ru', {
+                    'day': 'numeric', 'month': 'numeric', 'year': 'numeric'
+                });
+                if (columns[j] === "length") text = parseFloat(text).toString();
+                cell.appendChild(document.createTextNode(text));
+            }
+        }
+        makeTable();
+    }
+
+    filteringForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+
+        let data = new FormData();
+        data.append("column", document.getElementById("filter_column").value);
+        data.append("condition", document.getElementById("filter_condition").value);
+        data.append("filter_value", document.getElementById("filter_value").value);
+        axios.post('filter/', data)
+            .then(result => {
+                buildTable(result.data);
+                filtered = true;
+                filter_column = document.getElementById("filter_column").value;
+                filter_condition = document.getElementById("filter_condition").value;
+                filter_value = document.getElementById("filter_value").value;
+            })
+            .catch((error) => alert('Ошибка фильтрации: ' + error + '. Пожалуйста, исправьте введенные данные.'));
+    });
+
+    sortingForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+
+        let data = new FormData();
+        data.append("sort_column", document.getElementById("sort_column").value);
+        data.append("is_filtered", is_filtered);
+        data.append("column", filter_column);
+        data.append("condition", filter_condition);
+        data.append("filter_value", filter_value);
+        axios.post('sort/', data)
+            .then(result => {
+                buildTable(result.data);
+            })
+            .catch((error) => alert('Ошибка сортировки: ' + error + '. Пожалуйста, исправьте введенные данные.'));
+    });
+
+    rowCountInput.addEventListener('change', function (event) {
+        changePageNumberInputValue(1);
+        makeTable();
+    });
+
+    pageNumberInput.addEventListener('change', function (event) {
+        if (pageNumberInput.value < 1 || pageNumberInput.value > getMaxPagesCount()) {
+            alert('Ошибка: указан неверный номер страницы');
+            changePageNumberInputValue(currentPageNumber);
+        } else {
+            makeTable();
+        }
+    });
+
+    document.getElementById('to_begin').addEventListener('click', () => {
+        changePageNumberInputValue(1);
+        makeTable();
+    });
+    document.getElementById('to_previous').addEventListener('click', () => {
+        let newPageNumber = parseInt(pageNumberInput.value) - 1;
+        if (newPageNumber >= 1 && newPageNumber <= getMaxPagesCount()) {
+            changePageNumberInputValue(newPageNumber);
+            makeTable();
+        }
+    });
+    document.getElementById('to_next').addEventListener('click', () => {
+        let newPageNumber = parseInt(pageNumberInput.value) + 1;
+        if (newPageNumber >= 1 && newPageNumber <= getMaxPagesCount()) {
+            changePageNumberInputValue(newPageNumber);
+            makeTable();
+        }
+    });
+    document.getElementById('to_end').addEventListener('click', () => {
+        changePageNumberInputValue(getMaxPagesCount());
+        makeTable();
+    });
+
+
+    document.addEventListener("DOMContentLoaded", function (event) {
+        axios.post('table/')
+            .then(result => {
+                buildTable(result.data);
+            })
+            .catch((error) => alert('Ошибка получения данных таблицы: ' + error));
+    });
+</script>
+</body>
+</html>
